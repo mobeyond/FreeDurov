@@ -4,6 +4,9 @@ import numpy as np
 import tkinter as tk
 from tkinter import filedialog
 from PIL import Image
+import io
+import traceback
+import shutil
 
 # File and Image Handling Functions
 def select_input_image():
@@ -143,7 +146,15 @@ def make_more_square(contour):
 
 def filter_shapes_by_size(shapes, template, image_shape, shape_type):
     template_area = np.pi * template[2]**2 if shape_type == "circle" else template[2] * template[3]
-    filtered_shapes = [s for s in shapes if 0.5 * template_area <= cv2.contourArea(s) <= 1.5 * template_area]
+    filtered_shapes = []
+    
+    for s in shapes:
+        area = cv2.contourArea(s)
+        if 0.5 * template_area <= area <= 1.5 * template_area:
+            x, y, w, h = cv2.boundingRect(s)
+            aspect_ratio = float(w) / h if h != 0 else 0
+            if 0.7 <= aspect_ratio <= 1.3:  # Allow some tolerance from perfect square
+                filtered_shapes.append(s)
     
     to_remove = set()
     for i, shape1 in enumerate(filtered_shapes):
@@ -272,12 +283,16 @@ def detect_and_extract_profiles(image_path, output_dir):
     
     if not profile_regions:
         print("No profile regions detected.")
-        return [], len(contours), 0
+        return [], len(contours), [], []
 
     profile_images = extract_profiles(image, profile_regions, output_dir)
     create_gif_from_profiles(profile_images, output_dir)
     
-    return profile_images, len(contours), len(profile_regions)
+    # Remove the code that creates individual GIFs for each profile
+    # Instead, return the paths of the combined GIF animations
+    gif_files = [os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.startswith('profiles_gif_') and f.endswith('.gif')]
+
+    return profile_regions, len(contours), profile_images, gif_files
 
 # Main Execution
 def main():
@@ -286,13 +301,58 @@ def main():
         print("No image selected. Exiting.")
         return
 
-    output_dir = os.path.join(os.path.dirname(input_image), "output")
+    output_dir = os.path.join("./output",os.path.basename(input_image))
     os.makedirs(output_dir, exist_ok=True)
 
-    profiles, total_contours, extracted_profiles = detect_and_extract_profiles(input_image, output_dir)
+    profiles, total_contours, extracted_profiles, gif_files = detect_and_extract_profiles(input_image, output_dir)
 
     print(f"Total contours detected: {total_contours}")
     print(f"Profiles extracted: {extracted_profiles}")
+    print(f"GIF files saved: {', '.join(gif_files)}")
 
 if __name__ == "__main__":
     main()
+else:
+    # This block will be executed when the script is imported as a module
+    def process_image_for_web(image_data):
+        print("Entering process_image_for_web function")
+        temp_dir = 'temp_output'
+        try:
+            # Create a temporary file-like object
+            image_file = io.BytesIO(image_data)
+            
+            # Get the original filename from the image_file object
+            original_filename = image_file.name if hasattr(image_file, 'name') else 'uploaded_image'
+            base_filename = os.path.splitext(os.path.basename(original_filename))[0]
+            
+            # Create a temporary output folder with the original filename
+            temp_dir = os.path.join('temp_output', base_filename)
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            # Save the uploaded image temporarily
+            temp_image_path = os.path.join(temp_dir, 'temp_input.jpg')
+            with open(temp_image_path, 'wb') as f:
+                f.write(image_file.getvalue())
+            
+            # Process the image
+            profile_regions, total_contours, extracted_profiles, gif_files = detect_and_extract_profiles(temp_image_path, temp_dir)
+            print(f"temp_image_path: {temp_image_path}")
+            print(f"Total contours: {total_contours}")
+            print(f"GIF files: {gif_files}")
+
+            # Export all detected and extracted profiles as individual pictures
+            for i, profile in enumerate(extracted_profiles):
+                profile_path = os.path.join(temp_dir, f'profile_{i+1}.jpg')
+                cv2.imwrite(profile_path, profile)
+                print(f"Saved profile {i+1} to {profile_path}")
+
+            return gif_files
+        except Exception as e:
+            print(f"Error in process_image_for_web: {str(e)}")
+            print("Traceback:")
+            traceback.print_exc()
+            return None, [], None
+        finally:
+            # Don't remove the temporary directory, as we want to keep the exported profiles
+            print(f"Temporary directory with exported profiles: {temp_dir}")
+    
