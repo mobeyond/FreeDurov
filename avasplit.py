@@ -1,23 +1,9 @@
 import cv2
 import os
-import numpy as np
-import tkinter as tk
-from tkinter import filedialog
-from PIL import Image
-import io
 import traceback
-import shutil
-
-# File and Image Handling Functions
-def select_input_image():
-    root = tk.Tk()
-    root.withdraw()
-    file_path = filedialog.askopenfilename(
-        initialdir="./in/",
-        title="Select Input Image",
-        filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff")]
-    )
-    return file_path
+from gif_maker import create_gif_from_profiles
+import numpy as np
+import config
 
 def save_image(output_dir, filename, image):
     if image is None or image.size == 0:
@@ -27,6 +13,23 @@ def save_image(output_dir, filename, image):
         cv2.imwrite(os.path.join(output_dir, filename), image)
     except Exception as e:
         print(f"Error saving image {filename}: {str(e)}")
+
+def draw_contours(image_shape, contours):
+    if not contours:
+        return None
+    image = np.zeros(image_shape[:2], dtype=np.uint8)
+    cv2.drawContours(image, contours, -1, 255, 2)
+    return image
+
+def calculate_overlap(contour1, contour2, image_shape):
+    mask1 = np.zeros(image_shape[:2], dtype=np.uint8)
+    mask2 = np.zeros(image_shape[:2], dtype=np.uint8)
+    cv2.drawContours(mask1, [contour1], 0, 1, -1)
+    cv2.drawContours(mask2, [contour2], 0, 1, -1)
+    intersection = cv2.bitwise_and(mask1, mask2)
+    union = cv2.bitwise_or(mask1, mask2)
+    return np.sum(intersection) / np.sum(union)
+
 
 # Shape Analysis Functions
 def circularity(contour):
@@ -61,7 +64,7 @@ def refined_cluster_contours(contours, image_shape, output_dir):
 
     cluster_image = np.zeros(image_shape[:2] + (3,), dtype=np.uint8)
     colors = [(np.random.randint(0, 255), np.random.randint(0, 255), np.random.randint(0, 255)) for _ in range(n_clusters)]
-    
+
     for contour, label in zip(filtered_contours, labels.ravel()):
         color = colors[label]
         cv2.drawContours(cluster_image, [contour], 0, color, 2)
@@ -91,7 +94,7 @@ def refined_cluster_contours(contours, image_shape, output_dir):
         if M["m00"] != 0:
             cX, cY = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
             cv2.circle(best_cluster_image, (cX, cY), 5, (0, 0, 255), -1)
-    
+
     save_image(output_dir, '5c_best_cluster.jpg', best_cluster_image)
 
     return best_cluster_contours, shape_type
@@ -116,7 +119,7 @@ def create_adaptive_template(contours, shape_type):
 def match_template_to_cluster(cluster, template, image_shape, shape_type):
     matched_contours = []
     excluded_areas = np.zeros(image_shape[:2], dtype=np.uint8)
-    
+
     for contour in cluster:
         if not is_valid_contour(contour):
             continue
@@ -125,16 +128,15 @@ def match_template_to_cluster(cluster, template, image_shape, shape_type):
         if cv2.countNonZero(cv2.bitwise_and(excluded_areas, mask)) == 0:
             matched_contours.append(contour)
             excluded_areas = cv2.bitwise_or(excluded_areas, mask)
-    
-    return matched_contours
 
+    return matched_contours
 def make_more_circular(contour):
     if len(contour) < 5:
         return contour
     ellipse = cv2.fitEllipse(contour)
     (x, y), (MA, ma), angle = ellipse
     radius = int(max(MA, ma) / 2)
-    return np.array([[[int(x + radius * np.cos(np.deg2rad(i))), 
+    return np.array([[[int(x + radius * np.cos(np.deg2rad(i))),
                        int(y + radius * np.sin(np.deg2rad(i)))]] for i in range(360)], dtype=np.int32)
 
 def make_more_square(contour):
@@ -147,7 +149,7 @@ def make_more_square(contour):
 def filter_shapes_by_size(shapes, template, image_shape, shape_type):
     template_area = np.pi * template[2]**2 if shape_type == "circle" else template[2] * template[3]
     filtered_shapes = []
-    
+
     for s in shapes:
         area = cv2.contourArea(s)
         if 0.5 * template_area <= area <= 1.5 * template_area:
@@ -155,7 +157,7 @@ def filter_shapes_by_size(shapes, template, image_shape, shape_type):
             aspect_ratio = float(w) / h if h != 0 else 0
             if 0.7 <= aspect_ratio <= 1.3:  # Allow some tolerance from perfect square
                 filtered_shapes.append(s)
-    
+
     to_remove = set()
     for i, shape1 in enumerate(filtered_shapes):
         if i in to_remove:
@@ -169,13 +171,13 @@ def filter_shapes_by_size(shapes, template, image_shape, shape_type):
                 to_remove.add(j if abs(area1 - template_area) <= abs(area2 - template_area) else i)
                 if i in to_remove:
                     break
-    
+
     return [s for i, s in enumerate(filtered_shapes) if i not in to_remove]
 
 def generate_profile_regions(filtered_shapes, image_shape):
     profile_regions = []
     excluded_areas = np.zeros(image_shape[:2], dtype=np.uint8)
-    
+
     for shape in filtered_shapes:
         mask = np.zeros(image_shape[:2], dtype=np.uint8)
         cv2.drawContours(mask, [shape], 0, 1, -1)
@@ -183,8 +185,50 @@ def generate_profile_regions(filtered_shapes, image_shape):
             x, y, w, h = cv2.boundingRect(shape)
             profile_regions.append((int(x), int(y), int(w), int(h)))
             excluded_areas = cv2.bitwise_or(excluded_areas, mask)
-    
+
     return profile_regions
+
+def preprocess_image(image_path):
+    print(f"Preprocessing image: {image_path}")
+    image = cv2.imread(image_path)
+    if image is None:
+        raise ValueError(f"Failed to load image from {image_path}")
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    return image, gray, blurred
+
+def detect_edges_and_contours(blurred):
+    edges = cv2.Canny(blurred, 60, 180)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    enclosing_circles = [cv2.minEnclosingCircle(contour) for contour in contours]
+    return edges, contours, enclosing_circles
+
+def process_contours(contours, enclosing_circles, image_shape, output_dir):
+    print("Entering process_contours function")
+    try:
+
+        valid_contours, shape_type = refined_cluster_contours(contours, image_shape, output_dir)
+        if not valid_contours:
+            print("No valid contours found after refinement.")
+            return [], None, None
+
+        template = create_adaptive_template(valid_contours, shape_type)
+        matched_contours = match_template_to_cluster(contours, template, image_shape, shape_type)
+
+        processed_group = [make_more_circular(c) if shape_type == "circle" else make_more_square(c)
+                        for c in matched_contours if is_valid_contour(c)]
+
+        filtered_shapes = filter_shapes_by_size(processed_group, template, image_shape, shape_type)
+        profile_regions = generate_profile_regions(filtered_shapes, image_shape)
+
+        save_image(output_dir, '10_filtered_shapes.jpg', draw_contours(image_shape, filtered_shapes))
+
+        return profile_regions, template, shape_type
+    except Exception as e:
+        print(f"Error in process_contours: {str(e)}")
+        traceback.print_exc()
+        # Return default values if an error occurs
+        return [], None, None
 
 def extract_profiles(image, regions, output_dir):
     profile_images = []
@@ -192,90 +236,17 @@ def extract_profiles(image, regions, output_dir):
         profile = image[y:y+h, x:x+w]
         if profile is not None and profile.size > 0:
             profile_images.append(profile)
-    
+
     final_image = image.copy()
     for i, (x, y, w, h) in enumerate(regions):
         cv2.rectangle(final_image, (x, y), (x+w, y+h), (0, 255, 0), 2)
-        cv2.putText(final_image, f'{i+1}', (x, y-10), 
+        cv2.putText(final_image, f'{i+1}', (x, y-10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 255, 0), 1, cv2.LINE_AA)
     save_image(output_dir, '5_final_profiles.jpg', final_image)
-    
+
     return profile_images
 
-def draw_contours(image_shape, contours):
-    if not contours:
-        return None
-    image = np.zeros(image_shape[:2], dtype=np.uint8)
-    cv2.drawContours(image, contours, -1, 255, 2)
-    return image
-
-def calculate_overlap(contour1, contour2, image_shape):
-    mask1 = np.zeros(image_shape[:2], dtype=np.uint8)
-    mask2 = np.zeros(image_shape[:2], dtype=np.uint8)
-    cv2.drawContours(mask1, [contour1], 0, 1, -1)
-    cv2.drawContours(mask2, [contour2], 0, 1, -1)
-    intersection = cv2.bitwise_and(mask1, mask2)
-    union = cv2.bitwise_or(mask1, mask2)
-    return np.sum(intersection) / np.sum(union)
-
-# Image Processing Pipeline
-def preprocess_image(image_path):
-    image = cv2.imread(image_path)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (7, 7), 1)    
-    return image, gray, blurred
-
-def detect_edges_and_contours(blurred):
-    edges = cv2.Canny(blurred, 60, 180)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    print("Number of contours detected:", len(contours))
-    
-    enclosing_circles = [cv2.minEnclosingCircle(contour) for contour in contours]
-    return edges, contours, enclosing_circles
-
-def process_contours(contours, enclosing_circles, image_shape, output_dir):
-    valid_contours = [contour for contour, ((_, _), radius) in zip(contours, enclosing_circles) if radius >= 10]
-    
-    valid_contours, shape_type = refined_cluster_contours(valid_contours, image_shape, output_dir)
-    if not valid_contours:
-        print("No valid contours found after refinement.")
-        return [], None, None
-
-    template = create_adaptive_template(valid_contours, shape_type)
-    matched_contours = match_template_to_cluster(contours, template, image_shape, shape_type)
-    
-    processed_group = [make_more_circular(c) if shape_type == "circle" else make_more_square(c) 
-                       for c in matched_contours if is_valid_contour(c)]
-    
-    filtered_shapes = filter_shapes_by_size(processed_group, template, image_shape, shape_type)
-    profile_regions = generate_profile_regions(filtered_shapes, image_shape)
-    
-    save_image(output_dir, '10_filtered_shapes.jpg', draw_contours(image_shape, filtered_shapes))
-    
-    return profile_regions, template, shape_type
-
-def create_gif_from_profiles(profiles, output_dir, gif_duration=500):
-    if not profiles:
-        print("No profiles to create GIF from.")
-        return
-
-    for i in range(0, len(profiles), 25):
-        gif_profiles = profiles[i:i+25]
-        gif_count = i // 25 + 1
-        
-        pil_images = [Image.fromarray(cv2.cvtColor(profile, cv2.COLOR_BGR2RGB)) for profile in gif_profiles]
-        
-        gif_path = os.path.join(output_dir, f'profiles_gif_{gif_count}.gif')
-        pil_images[0].save(
-            gif_path,
-            save_all=True,
-            append_images=pil_images[1:],
-            duration=gif_duration,
-            loop=0
-        )
-        print(f"Created GIF: {gif_path}")
-
-def detect_and_extract_profiles(image_path, output_dir):
+def detect_and_extract_profiles(image_path, output_dir, url, include_qr=config.INCLUDE_QR_CODE):
     image, gray, blurred = preprocess_image(image_path)
     edges, contours, enclosing_circles = detect_edges_and_contours(blurred)
     
@@ -286,73 +257,6 @@ def detect_and_extract_profiles(image_path, output_dir):
         return [], len(contours), [], []
 
     profile_images = extract_profiles(image, profile_regions, output_dir)
-    create_gif_from_profiles(profile_images, output_dir)
+    gif_files = create_gif_from_profiles(profile_images, output_dir, url=url, include_qr=include_qr)
     
-    # Remove the code that creates individual GIFs for each profile
-    # Instead, return the paths of the combined GIF animations
-    gif_files = [os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.startswith('profiles_gif_') and f.endswith('.gif')]
-
     return profile_regions, len(contours), profile_images, gif_files
-
-# Main Execution
-def main():
-    input_image = select_input_image()
-    if not input_image:
-        print("No image selected. Exiting.")
-        return
-
-    output_dir = os.path.join("./output",os.path.basename(input_image))
-    os.makedirs(output_dir, exist_ok=True)
-
-    profiles, total_contours, extracted_profiles, gif_files = detect_and_extract_profiles(input_image, output_dir)
-
-    print(f"Total contours detected: {total_contours}")
-    print(f"Profiles extracted: {extracted_profiles}")
-    print(f"GIF files saved: {', '.join(gif_files)}")
-
-if __name__ == "__main__":
-    main()
-else:
-    # This block will be executed when the script is imported as a module
-    def process_image_for_web(image_data):
-        print("Entering process_image_for_web function")
-        temp_dir = 'temp_output'
-        try:
-            # Create a temporary file-like object
-            image_file = io.BytesIO(image_data)
-            
-            # Get the original filename from the image_file object
-            original_filename = image_file.name if hasattr(image_file, 'name') else 'uploaded_image'
-            base_filename = os.path.splitext(os.path.basename(original_filename))[0]
-            
-            # Create a temporary output folder with the original filename
-            temp_dir = os.path.join('temp_output', base_filename)
-            os.makedirs(temp_dir, exist_ok=True)
-            
-            # Save the uploaded image temporarily
-            temp_image_path = os.path.join(temp_dir, 'temp_input.jpg')
-            with open(temp_image_path, 'wb') as f:
-                f.write(image_file.getvalue())
-            
-            # Process the image
-            profile_regions, total_contours, extracted_profiles, gif_files = detect_and_extract_profiles(temp_image_path, temp_dir)
-            print(f"temp_image_path: {temp_image_path}")
-            print(f"Total contours: {total_contours}")
-            print(f"GIF files: {gif_files}")
-
-            # Export all detected and extracted profiles as individual pictures
-            for i, profile in enumerate(extracted_profiles):
-                profile_path = os.path.join(temp_dir, f'profile_{i+1}.jpg')
-                cv2.imwrite(profile_path, profile)
-                print(f"Saved profile {i+1} to {profile_path}")
-
-            return gif_files
-        except Exception as e:
-            print(f"Error in process_image_for_web: {str(e)}")
-            print("Traceback:")
-            traceback.print_exc()
-            return None, [], None
-        finally:
-            # Don't remove the temporary directory, as we want to keep the exported profiles
-            print(f"Temporary directory with exported profiles: {temp_dir}")
-    
