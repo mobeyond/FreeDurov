@@ -1,10 +1,9 @@
 import cv2
-import os
-import traceback
+import os, traceback, config
 from gif_maker import create_gif_from_profiles
 import numpy as np
-import config
 
+# Fundamental Processing
 def save_image(output_dir, filename, image):
     if image is None or image.size == 0:
         print(f"Warning: Attempted to save empty image: {filename}")
@@ -21,16 +20,6 @@ def draw_contours(image_shape, contours):
     cv2.drawContours(image, contours, -1, 255, 2)
     return image
 
-def calculate_overlap(contour1, contour2, image_shape):
-    mask1 = np.zeros(image_shape[:2], dtype=np.uint8)
-    mask2 = np.zeros(image_shape[:2], dtype=np.uint8)
-    cv2.drawContours(mask1, [contour1], 0, 1, -1)
-    cv2.drawContours(mask2, [contour2], 0, 1, -1)
-    intersection = cv2.bitwise_and(mask1, mask2)
-    union = cv2.bitwise_or(mask1, mask2)
-    return np.sum(intersection) / np.sum(union)
-
-
 # Shape Analysis Functions
 def circularity(contour):
     area = cv2.contourArea(contour)
@@ -45,12 +34,21 @@ def shape_factor(contour):
     perimeter = cv2.arcLength(contour, True)
     return (4 * np.pi * area) / (perimeter * perimeter) if perimeter else 0
 
+def calculate_overlap(contour1, contour2, image_shape):
+    mask1 = np.zeros(image_shape[:2], dtype=np.uint8)
+    mask2 = np.zeros(image_shape[:2], dtype=np.uint8)
+    cv2.drawContours(mask1, [contour1], 0, 1, -1)
+    cv2.drawContours(mask2, [contour2], 0, 1, -1)
+    intersection = cv2.bitwise_and(mask1, mask2)
+    union = cv2.bitwise_or(mask1, mask2)
+    return np.sum(intersection) / np.sum(union)
+
 # Contour Processing Functions
 def refined_cluster_contours(contours, image_shape, output_dir):
     total_area = image_shape[0] * image_shape[1]
-    min_area = total_area * 0.001
+    min_area = max(total_area * config.MIN_CONTOUR_RATIO, config.MIN_CONTOUR_AREA)
     filtered_contours = [c for c in contours if is_valid_contour(c) and cv2.contourArea(c) >= min_area]
-
+    print("Num of Filtered Contours", len(filtered_contours))
     if len(filtered_contours) < 2:
         print("Not enough large contours for clustering.")
         return filtered_contours, None
@@ -83,7 +81,7 @@ def refined_cluster_contours(contours, image_shape, output_dir):
         cluster_metrics.append((i, total_cluster_area, avg_shape_factor))
 
     best_cluster = sorted(cluster_metrics, key=lambda x: x[1], reverse=True)[0]
-    shape_type = "circle" if abs(best_cluster[2] - 1) < abs(best_cluster[2] - 0.785) else "square"
+    shape_type = "circle" if abs(best_cluster[2] - 1) < abs(best_cluster[2] - config.SQR_OR_CIRC) else "square"  # Perimeter Ratio
     print(f"Shape type: {shape_type}", best_cluster[2])
     best_cluster_contours = [filtered_contours[i] for i, label in enumerate(labels.ravel()) if label == best_cluster[0]]
 
@@ -155,7 +153,7 @@ def filter_shapes_by_size(shapes, template, image_shape, shape_type):
         if 0.5 * template_area <= area <= 1.5 * template_area:
             x, y, w, h = cv2.boundingRect(s)
             aspect_ratio = float(w) / h if h != 0 else 0
-            if 0.7 <= aspect_ratio <= 1.3:  # Allow some tolerance from perfect square
+            if 0.7 <= aspect_ratio <= 1.3:  # Tolerance from perfect square
                 filtered_shapes.append(s)
 
     to_remove = set()
@@ -188,25 +186,10 @@ def generate_profile_regions(filtered_shapes, image_shape):
 
     return profile_regions
 
-def preprocess_image(image_path):
-    print(f"Preprocessing image: {image_path}")
-    image = cv2.imread(image_path)
-    if image is None:
-        raise ValueError(f"Failed to load image from {image_path}")
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    return image, gray, blurred
-
-def detect_edges_and_contours(blurred):
-    edges = cv2.Canny(blurred, 60, 180)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    enclosing_circles = [cv2.minEnclosingCircle(contour) for contour in contours]
-    return edges, contours, enclosing_circles
-
-def process_contours(contours, enclosing_circles, image_shape, output_dir):
+def process_contours(contours, image_shape, output_dir):
     print("Entering process_contours function")
+#    enclosing_circles = [cv2.minEnclosingCircle(contour) for contour in contours]
     try:
-
         valid_contours, shape_type = refined_cluster_contours(contours, image_shape, output_dir)
         if not valid_contours:
             print("No valid contours found after refinement.")
@@ -240,23 +223,27 @@ def extract_profiles(image, regions, output_dir):
     final_image = image.copy()
     for i, (x, y, w, h) in enumerate(regions):
         cv2.rectangle(final_image, (x, y), (x+w, y+h), (0, 255, 0), 2)
-        cv2.putText(final_image, f'{i+1}', (x, y-10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 255, 0), 1, cv2.LINE_AA)
+        cv2.putText(final_image, f'{i+1}', (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 255, 0), 1, cv2.LINE_AA)
     save_image(output_dir, '5_final_profiles.jpg', final_image)
-
     return profile_images
 
-def detect_and_extract_profiles(image_path, output_dir, url, include_qr=config.INCLUDE_QR_CODE):
-    image, gray, blurred = preprocess_image(image_path)
-    edges, contours, enclosing_circles = detect_edges_and_contours(blurred)
-    
-    profile_regions, template, shape_type = process_contours(contours, enclosing_circles, image.shape[:2], output_dir)
-    
+def preprocess_image(image_path):
+    print(f"Preprocessing image: {image_path}")
+    image = cv2.imread(image_path)
+    if image is None:
+        raise ValueError(f"Failed to load image from {image_path}")
+    edges = cv2.Canny(cv2.GaussianBlur(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), (5, 5), 0), 60, 180)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    return image, contours
+
+def detect_and_extract_profiles(image_path, output_dir, gif_duration, url, include_qr):
+    image, contours = preprocess_image(image_path)
+    profile_regions, template, shape_type = process_contours(contours, image.shape[:2], output_dir)
     if not profile_regions:
         print("No profile regions detected.")
         return [], len(contours), [], []
 
     profile_images = extract_profiles(image, profile_regions, output_dir)
-    gif_files = create_gif_from_profiles(profile_images, output_dir, url=url, include_qr=include_qr)
-    
-    return profile_regions, len(contours), profile_images, gif_files
+    gif_files = create_gif_from_profiles(profile_images, output_dir, gif_duration, url, include_qr)
+
+    return profile_regions, len(profile_images), profile_images, gif_files

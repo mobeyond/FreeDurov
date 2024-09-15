@@ -56,7 +56,7 @@ def create_gif_from_profiles(profiles, output_dir, gif_duration=config.GIF_DURAT
             base_image = base_image.convert("RGB").convert("P", palette=Image.ADAPTIVE, colors=256)
             pil_images.append(base_image)
         except Exception as e:
-            print(f"Error processing spy image: {str(e)}")
+            print(f"Error processing base image: {str(e)}")
             traceback.print_exc()
         
         gif_path = os.path.join(output_dir, f'profiles_gif_{gif_count}.gif')
