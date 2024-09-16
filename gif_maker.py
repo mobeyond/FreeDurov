@@ -1,7 +1,44 @@
 import config
+from PIL import Image, ImageDraw
+import cv2
+import numpy as np
+import os, traceback
 from PIL import Image
-import qrcode
-import os, cv2, traceback
+
+def round_corners(image, corner_ratio=config.CORNER_ROUNDING_RATIO):
+    # Calculate radius based on the smaller dimension of the image
+    radius = int(min(image.size) * corner_ratio)
+    
+    # Create a mask for rounded corners
+    mask = Image.new('L', image.size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle([(0, 0), image.size], radius, fill=255)
+    
+    # Ensure the image has an alpha channel
+    if image.mode != 'RGBA':
+        image = image.convert('RGBA')
+    
+    # Apply the mask to the image's alpha channel
+    image_rgba = image.copy()
+    image_rgba.putalpha(mask)
+    
+    return image_rgba
+
+def polish_image(image, corner_ratio=config.CORNER_ROUNDING_RATIO):
+    # Convert PIL Image to OpenCV format
+    cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGBA2BGRA)
+    
+    # Apply Gaussian blur
+    blurred = cv2.GaussianBlur(cv_image, (0, 0), 3)
+    
+    # Sharpen the image
+    sharpened = cv2.addWeighted(cv_image, 1.5, blurred, -0.5, 0)
+    
+    # Convert back to PIL Image
+    pil_image = Image.fromarray(cv2.cvtColor(sharpened, cv2.COLOR_BGRA2RGBA))
+    
+    # Apply rounded corners
+    return round_corners(pil_image, corner_ratio)
 
 def create_qr_code(url, size):
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
@@ -29,9 +66,9 @@ def create_gif_from_profiles(profiles, output_dir, gif_duration=config.GIF_DURAT
             print(f"No valid images for GIF {gif_count}")
             continue
 
-        # Determine the largest size in the current group
-        max_height = max(profile.shape[0] for profile in gif_profiles)
-        max_width = max(profile.shape[1] for profile in gif_profiles)
+        # Determine the largest size in the current group and scale it up by 1.5
+        max_height = int(max(profile.shape[0] for profile in gif_profiles) * 1.5)
+        max_width = int(max(profile.shape[1] for profile in gif_profiles) * 1.5)
         max_size = (max_width, max_height)
 
         pil_images = []
@@ -39,35 +76,44 @@ def create_gif_from_profiles(profiles, output_dir, gif_duration=config.GIF_DURAT
         # This block should only execute if include_qr is True
         if include_qr:
             qr_image = create_qr_code(url, max_size)
-            qr_image = qr_image.convert("RGB").convert("P", palette=Image.ADAPTIVE, colors=256)
+            qr_image = qr_image.convert("RGBA")
+            qr_image = polish_image(qr_image)
             pil_images.append(qr_image)
         
         # Add profile images
         for profile in gif_profiles:
-            pil_image = Image.fromarray(cv2.cvtColor(profile, cv2.COLOR_BGR2RGB))
+            pil_image = Image.fromarray(cv2.cvtColor(profile, cv2.COLOR_BGR2RGBA))
             pil_image = pil_image.resize(max_size, Image.LANCZOS)
-            pil_image = pil_image.convert("RGB").convert("P", palette=Image.ADAPTIVE, colors=256)
+            pil_image = polish_image(pil_image)
             pil_images.append(pil_image)
         
         # Add spy image as the last frame
         try:
-            base_image = Image.open(config.BASE_IMAGE_PATH)
+            base_image = Image.open(config.BASE_IMAGE_PATH).convert("RGBA")
             base_image = base_image.resize(max_size, Image.LANCZOS)
-            base_image = base_image.convert("RGB").convert("P", palette=Image.ADAPTIVE, colors=256)
+            base_image = polish_image(base_image)
             pil_images.append(base_image)
         except Exception as e:
             print(f"Error processing base image: {str(e)}")
             traceback.print_exc()
         
+        # Before saving, create a new list of images with a white background
+        images_with_background = []
+        for img in pil_images:
+            bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+            bg.paste(img, (0, 0), img)
+            images_with_background.append(bg.convert("RGB"))
+
         gif_path = os.path.join(output_dir, f'profiles_gif_{gif_count}.gif')
         try:
-            pil_images[0].save(
+            images_with_background[0].save(
                 gif_path,
                 save_all=True,
-                append_images=pil_images[1:],
+                append_images=images_with_background[1:],
                 duration=gif_duration,
                 loop=0,  # 0 means loop indefinitely
-                optimize=False
+                optimize=False,
+                disposal=2  # Clear the frame before rendering the next one
             )
             print(f"Created GIF: {gif_path}")
             gif_files.append(gif_path)

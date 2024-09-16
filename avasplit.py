@@ -71,7 +71,7 @@ def refined_cluster_contours(contours, image_shape, output_dir):
             cX, cY = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
             cv2.circle(cluster_image, (cX, cY), 5, color, -1)
 
-    save_image(output_dir, '5b_cluster_visualization.jpg', cluster_image)
+#    save_image(output_dir, '5b_cluster_visualization.jpg', cluster_image)
 
     cluster_metrics = []
     for i in range(n_clusters):
@@ -93,7 +93,7 @@ def refined_cluster_contours(contours, image_shape, output_dir):
             cX, cY = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
             cv2.circle(best_cluster_image, (cX, cY), 5, (0, 0, 255), -1)
 
-    save_image(output_dir, '5c_best_cluster.jpg', best_cluster_image)
+#   save_image(output_dir, '5c_best_cluster.jpg', best_cluster_image)
 
     return best_cluster_contours, shape_type
 
@@ -148,29 +148,24 @@ def filter_shapes_by_size(shapes, template, image_shape, shape_type):
     template_area = np.pi * template[2]**2 if shape_type == "circle" else template[2] * template[3]
     filtered_shapes = []
 
-    for s in shapes:
-        area = cv2.contourArea(s)
+    # Sort shapes by area difference from template area
+    shapes_with_area = [(s, cv2.contourArea(s)) for s in shapes]
+    shapes_with_area.sort(key=lambda x: abs(x[1] - template_area))
+
+    excluded_areas = np.zeros(image_shape[:2], dtype=np.uint8)
+
+    for shape, area in shapes_with_area:
         if 0.5 * template_area <= area <= 1.5 * template_area:
-            x, y, w, h = cv2.boundingRect(s)
+            x, y, w, h = cv2.boundingRect(shape)
             aspect_ratio = float(w) / h if h != 0 else 0
             if 0.7 <= aspect_ratio <= 1.3:  # Tolerance from perfect square
-                filtered_shapes.append(s)
+                mask = np.zeros(image_shape[:2], dtype=np.uint8)
+                cv2.drawContours(mask, [shape], 0, 1, -1)
+                if cv2.countNonZero(cv2.bitwise_and(excluded_areas, mask)) == 0:
+                    filtered_shapes.append(shape)
+                    excluded_areas = cv2.bitwise_or(excluded_areas, mask)
 
-    to_remove = set()
-    for i, shape1 in enumerate(filtered_shapes):
-        if i in to_remove:
-            continue
-        for j, shape2 in enumerate(filtered_shapes[i+1:], start=i+1):
-            if j in to_remove:
-                continue
-            overlap = calculate_overlap(shape1, shape2, image_shape)
-            if overlap > 0.2:
-                area1, area2 = cv2.contourArea(shape1), cv2.contourArea(shape2)
-                to_remove.add(j if abs(area1 - template_area) <= abs(area2 - template_area) else i)
-                if i in to_remove:
-                    break
-
-    return [s for i, s in enumerate(filtered_shapes) if i not in to_remove]
+    return filtered_shapes
 
 def generate_profile_regions(filtered_shapes, image_shape):
     profile_regions = []
@@ -204,7 +199,7 @@ def process_contours(contours, image_shape, output_dir):
         filtered_shapes = filter_shapes_by_size(processed_group, template, image_shape, shape_type)
         profile_regions = generate_profile_regions(filtered_shapes, image_shape)
 
-        save_image(output_dir, '10_filtered_shapes.jpg', draw_contours(image_shape, filtered_shapes))
+#        save_image(output_dir, '10_filtered_shapes.jpg', draw_contours(image_shape, filtered_shapes))
 
         return profile_regions, template, shape_type
     except Exception as e:

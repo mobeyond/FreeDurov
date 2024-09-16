@@ -1,7 +1,7 @@
-import io, cgi, http.server, traceback
+import io, traceback, cgi, http.server, ssl, threading
+import config
 from image_processor import process_avasplit
 from html_generator import generate_html_response, generate_no_gifs_html
-from utils import clean_up_files
 
 class MyHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
@@ -52,7 +52,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 print("No GIF files generated. Sending disclaimer response.")
                 html_response = generate_no_gifs_html()
             else:
-                html_response = generate_html_response(gif_files)
+                html_response = generate_html_response(gif_files, self.server.server_port)
 
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
@@ -116,3 +116,27 @@ def generate_error_html(error_message):
     </body>
     </html>
     '''
+
+def run_server(port, use_https=False):
+    server_address = ('', port)
+    httpd = http.server.HTTPServer(server_address, MyHandler)
+    
+    if use_https:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=config.SSL_CERT_FILE, keyfile=config.SSL_KEY_FILE)
+        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+        print(f"Serving HTTPS on port {port}")
+    else:
+        print(f"Serving HTTP on port {port}")
+    
+    httpd.serve_forever()
+
+if __name__ == "__main__":
+    http_thread = threading.Thread(target=run_server, args=(config.HTTP_PORT,))
+    https_thread = threading.Thread(target=run_server, args=(config.HTTPS_PORT, True))
+    
+    http_thread.start()
+    https_thread.start()
+    
+    http_thread.join()
+    https_thread.join()
