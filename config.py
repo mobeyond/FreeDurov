@@ -4,7 +4,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR = os.path.join(BASE_DIR, "temp_output")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-BASE_IMAGE_PATH = os.path.join(BASE_DIR, "assets", "base.png")
+BASE_IMAGE_PATH = os.path.join(BASE_DIR, "base.png")
 
 # Logging configuration
 DEBUG = False
