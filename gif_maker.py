@@ -111,7 +111,7 @@ def create_gif_from_profiles(profiles, output_dir, gif_duration=config.GIF_DURAT
                 save_all=True,
                 append_images=images_with_background[1:],
                 duration=gif_duration,
-                loop=0,  # 0 means loop indefinitely
+                loop=3,  # 0 means loop indefinitely
                 optimize=False,
                 disposal=2  # Clear the frame before rendering the next one
             )

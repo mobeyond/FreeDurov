@@ -15,9 +15,9 @@ ERROR_NO_IMAGE = "No image data received"
 ERROR_NO_PROFILES = "No significant info detected in the image"
 
 # Server configuration
-DOMAIN_NAME = "m.rolead.com"
+DOMAIN_NAME = "go.rolead.com"
 HOST = "0.0.0.0"
-PORT = 9112
+PORT = 9111
 
 # Image processing settings
 MIN_CONTOUR_RATIO = 0.0005  # Minimum ratio for a contour to be considered
@@ -32,7 +32,7 @@ CORNER_RADIUS = 15  # Adjust this value to change the roundness of corners
 CORNER_ROUNDING_RATIO = 0.15
 
 # GIF generation settings
-GIF_DURATION = 800  # Duration for each frame in the GIF (milliseconds)
+GIF_DURATION = 1000  # Duration for each frame in the GIF (milliseconds)
 MAX_PROFILES_PER_GIF = 100  # Maximum number of profiles to include in a single GIF
 # QR Feature flags
 INCLUDE_QR_CODE = False  # Set to True to enable QR code embedding
@@ -47,7 +47,7 @@ HTML_BACKGROUND_COLOR = "#f0f0f0"
 
 # Server configurations
 HTTP_PORT = 8000
-HTTPS_PORT = 1984  # Changed from 8443 to 1984 as per your previous setup
+HTTPS_PORT = 8443  # Changed from 8443 to 1984 as per your previous setup
 
 # SSL certificate configurations
 SSL_CERT_FILE = "cert.pem"
