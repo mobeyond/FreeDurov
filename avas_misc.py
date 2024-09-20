@@ -28,7 +28,6 @@ def main():
     profile_regions, total_profiles, extracted_profiles, gif_files = detect_and_extract_profiles(input_image, output_dir, config.GIF_DURATION, config.QR_CODE_URL, config.INCLUDE_QR_CODE)
 
     print(f"Total profiles: {total_profiles}")
-#    print(f"GIF files saved: {', '.join(gif_files)}")
 
 if __name__ == "__main__":
     main()

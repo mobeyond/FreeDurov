@@ -38,7 +38,6 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
         print(f"Received POST data of length: {content_length}")
 
         try:
-            # Parse the multipart form data
             boundary = self.headers['Content-Type'].split("=")[1].encode()
             fields = cgi.parse_multipart(io.BytesIO(post_data), {"boundary": boundary})
             

@@ -20,7 +20,6 @@ def process_avasplit(image_data):
         if img is None:
             raise ValueError(config.ERROR_NO_IMAGE)
         
-        # Explicitly save as PNG
         is_success, im_buf_arr = cv2.imencode(".png", img)
         if is_success:
             im_buf_arr.tofile(temp_image_path)
