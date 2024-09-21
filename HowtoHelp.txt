@@ -1,0 +1,4 @@
+If you love to use that messenger, and you happen to know how to setup a mini web server powered by python, just put it up somewhere you'd like, and help people around the world to show their respects to a guy who lost his freedom for freeing speeches of others. 
+It's as simple as a command of "python3 ./server.py". Of course, we need to obtain a cert file with its key first, in the name of "key.pem" and cert.pem" under the same directory. And for python part, obtain the required packages needed.
+ 
+
