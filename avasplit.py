@@ -24,24 +24,10 @@ def save_image(output_dir, filename, image, force_save=False):
         tprint(f"Warning: Attempted to save empty image: {filename}")
         return
     try:
-        cv2.imwrite(os.path.join(output_dir, filename), image)
+        return
+#        cv2.imwrite(os.path.join(output_dir, filename), image)
     except Exception as e:
         tprint(f"Error saving image {filename}: {str(e)}")
-
-def visualized_corners(contours, image_shape):
-    height, width = image_shape[:2]
-    image = np.zeros((height, width), dtype=np.uint8)
-    
-    cv2.drawContours(image, contours, -1, 255, 2)
-    corners = cv2.goodFeaturesToTrack(image, 100, 0.01, 10)
-    corners = np.int0(corners)
-    print("len of corners", len(corners))
-    for corner in corners:
-        x, y = corner.ravel()
-        cv2.circle(image, (x, y), 10, 255, -1)
-        print("x,y", x,y)
-
-    return corners
 
 def is_valid_contour(contour):
     return len(contour) >= 3 and cv2.contourArea(contour) > 0
@@ -130,6 +116,7 @@ def refined_cluster_contours(contours, image_shape, output_dir):
         if M["m00"] != 0:
             cX, cY = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
             cv2.circle(cluster_image, (cX, cY), 5, color, -1)
+            save_image(output_dir, '5b_cluster_visualization.jpg', cluster_image)
 
     cluster_metrics = []
     for i in range(n_clusters):
@@ -140,11 +127,12 @@ def refined_cluster_contours(contours, image_shape, output_dir):
 
     best_cluster = sorted(cluster_metrics, key=lambda x: x[1], reverse=True)[0]
     shape_type = "circle" if abs(best_cluster[2] - 1) < abs(best_cluster[2] - config.SQR_OR_CIRC) else "square"  # Perimeter Ratio
-    tprint(f"Shape type: {shape_type}", best_cluster[2])    
+    tprint(f"Shape type: {shape_type}", best_cluster[2])
     best_cluster_contours = [filtered_contours[i] for i, label in enumerate(labels.ravel()) if label == best_cluster[0]]
 
 
     refined_contours = make_more_shape(best_cluster_contours, shape_type)
+    save_image(output_dir, '5d_refined_contours.jpg', draw_contours(image_shape, refined_contours))
 
     return refined_contours, shape_type
 
@@ -245,6 +233,7 @@ def align_and_resize_contours(contours, image_shape, shape_type):
     for centroid in adjusted_centroids:
         cv2.circle(vis_image, (int(centroid[0]), int(centroid[1])), 5, (0, 0, 255), -1)
 
+
     resized_contours = []
     for contour, centroid in zip(contours, adjusted_centroids):
         if shape_type == "square":
@@ -304,7 +293,7 @@ def template_guided_aggregation(filtered_shapes, contours, template, image_shape
         return cv2.convexHull(combined)
 
     template_size = template[2] * 2 if shape_type == "circle" else template[2]
-    
+
     tprint(f"Iteration {iteration}: Input contours: {len(contours)}")
     tprint(f"Iteration {iteration}: Template size: {template_size}")
 
@@ -314,28 +303,28 @@ def template_guided_aggregation(filtered_shapes, contours, template, image_shape
     while remaining_contours:
         base_contour = remaining_contours.pop(0)
         base_size = get_shape_size(base_contour, shape_type)
-        
+
         if base_size >= template_size:
             aggregated_contours.append(base_contour)
             continue
-        
+
         cluster = [base_contour]
         cluster_size = base_size
-        
+
         for i in range(len(remaining_contours) - 1, -1, -1):
             if cluster_size >= template_size:
                 break
-            
+
             candidate = remaining_contours[i]
             candidate_size = get_shape_size(candidate, shape_type)
-            
+
             distance_threshold = 0.05 * max(image_shape) if iteration == 1 else 0.1 * max(image_shape)
             if contour_distance(base_contour, candidate) < distance_threshold:
                 if cluster_size + candidate_size <= 1.2 * template_size:
                     cluster.append(candidate)
                     cluster_size = get_shape_size(merge_contours(cluster), shape_type)
                     remaining_contours.pop(i)
-        
+
         if cluster_size >= 0.5 * template_size:  # Adjust this threshold if needed
             merged = merge_contours(cluster)
             aggregated_contours.append(merged)
@@ -351,7 +340,7 @@ def template_guided_aggregation(filtered_shapes, contours, template, image_shape
 
 def strict_combine_contours(filtered_shapes, aggregated_contours, template, tpl_shape_type, image_shape, output_dir):
     template_size = template[2] * 2 if tpl_shape_type == "circle" else template[2]
-    
+
     def get_contour_centroid(contour):
         M = cv2.moments(contour)
         if M["m00"] != 0:
@@ -359,13 +348,13 @@ def strict_combine_contours(filtered_shapes, aggregated_contours, template, tpl_
         return None
 
     filtered_centroids = [get_contour_centroid(c) for c in filtered_shapes]
-    
+
     non_overlapping_contours = []
     for contour in aggregated_contours:
         contour_centroid = get_contour_centroid(contour)
         if contour_centroid is None:
             continue
-        
+
         overlaps = False
         for anchor, anchor_centroid in zip(filtered_shapes, filtered_centroids):
             if anchor_centroid is None:
@@ -375,11 +364,12 @@ def strict_combine_contours(filtered_shapes, aggregated_contours, template, tpl_
                 if calculate_overlap(contour, anchor, image_shape) > 0:
                     overlaps = True
                     break
-        
+
         if not overlaps:
             non_overlapping_contours.append(contour)
 
-    
+    save_image(output_dir, '13c_non_overlapping_contours.jpg', draw_contours(image_shape, non_overlapping_contours))
+
     combined_contours = filtered_shapes.copy()
 
     template_area = np.pi * (template[2] / 2) ** 2 if tpl_shape_type == "circle" else template[2] * template[3]
@@ -387,7 +377,7 @@ def strict_combine_contours(filtered_shapes, aggregated_contours, template, tpl_
     for contour in non_overlapping_contours:
         if cv2.contourArea(contour) < 0.25 * template_area:
             continue
-        
+
         overlaps = False
         for existing in combined_contours:
             existing_centroid = get_contour_centroid(existing)
@@ -398,7 +388,7 @@ def strict_combine_contours(filtered_shapes, aggregated_contours, template, tpl_
                 if calculate_overlap(contour, existing, image_shape) > 0:
                     overlaps = True
                     break
-        
+
         if not overlaps:
             combined_contours.append(contour)
 
@@ -446,46 +436,56 @@ def process_contours(contours, image_shape, output_dir, original_image):
 
         template = create_adaptive_template(valid_contours, tpl_shape_type)
         matched_contours = match_template_to_contours(contours, template, image_shape, tpl_shape_type)
-        
+
+        save_image(output_dir, '7_matched_contours.jpg', draw_contours(image_shape, matched_contours))
         tprint(f"Number of matched contours: {len(matched_contours)}")
 
         processed_group = [make_more_circular(c) if tpl_shape_type == "circle" else make_more_square(c)
                         for c in matched_contours if is_valid_contour(c)]
-        
+
+        save_image(output_dir, '8_processed_group.jpg', draw_contours(image_shape, processed_group))
         tprint(f"Number of processed contours: {len(processed_group)}")
 
         filtered_shapes = filter_shapes_by_size(processed_group, template, image_shape, tpl_shape_type)
-        
+        save_image(output_dir, '9_filtered_shapes.jpg', draw_contours(image_shape, filtered_shapes))
+
         refined_contours = refine_contours(valid_contours, image_shape)
-        
+
         mask = np.zeros(image_shape[:2], dtype=np.uint8)
         cv2.drawContours(mask, filtered_shapes, -1, 255, -1)
-        
+
         inverted_mask = cv2.bitwise_not(mask)
         masked_image = cv2.bitwise_and(original_image, original_image, mask=inverted_mask)
+        save_image(output_dir, '11_masked_original.jpg', masked_image)
 
         blurred = cv2.bilateralFilter(masked_image, 9, 75, 75)  # Edge-preserving blur
         gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
         enhanced = clahe.apply(gray)
         next_edges = cv2.Canny(enhanced, 20, 200)  # Aggressive thresholds
+        save_image(output_dir, '12_aggressive_edges.jpg', next_edges)
 
         kernel = np.ones((3,3), np.uint8)
         dilated_edges = cv2.dilate(next_edges, kernel, iterations=1)
+        save_image(output_dir, '12b_dilated_edges.jpg', dilated_edges)
 
         new_contours, _ = cv2.findContours(dilated_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        save_image(output_dir, '12b_new_contours.jpg', draw_contours(image_shape, new_contours))
         tprint(f"Number of new contours found: {len(new_contours)}")
 
         aggregated_contours = template_guided_aggregation(filtered_shapes, new_contours, template, image_shape, tpl_shape_type, iteration=1)
+        save_image(output_dir, '12c_aggregated_contours_round1.jpg', draw_contours(image_shape, aggregated_contours))
         tprint(f"Number of contours after first aggregation: {len(aggregated_contours)}")
 
         combined_contours = strict_combine_contours(filtered_shapes, aggregated_contours, template, tpl_shape_type, image_shape, output_dir)
+        save_image(output_dir, '13_strictly_combined_contours.jpg', draw_contours(image_shape, combined_contours))
 
         aligned_combined_contours = align_and_resize_contours(combined_contours, image_shape, tpl_shape_type)
+        save_image(output_dir, '14_aligned_combined_contours.jpg', draw_contours(image_shape, aligned_combined_contours))
 
         profile_regions = generate_profile_regions(aligned_combined_contours, image_shape)
-        
-        profiles = extract_profiles(original_image, profile_regions, output_dir)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+
+        profiles = extract_profiles(original_image, profile_regions, output_dir)
 
         return combined_contours, tpl_shape_type, profiles
 
@@ -502,10 +502,10 @@ def generate_profile_regions(extracting_shapes, image_shape):
         mask = np.zeros(image_shape[:2], dtype=np.uint8)
         cv2.drawContours(mask, [shape], 0, 1, -1)
         if cv2.countNonZero(cv2.bitwise_and(excluded_areas, mask)) == 0:
-            x, y, w, h = cv2.boundingRect(shape)        #boundary touching shapes are excluded  
+            x, y, w, h = cv2.boundingRect(shape)        #boundary touching shapes are excluded
             profile_regions.append((int(x), int(y), int(w), int(h)))
             excluded_areas = cv2.bitwise_or(excluded_areas, mask)
-    
+
     return profile_regions
 
 def extract_profiles(image, regions, output_dir):
@@ -519,6 +519,7 @@ def extract_profiles(image, regions, output_dir):
     for i, (x, y, w, h) in enumerate(regions):
         cv2.rectangle(final_image, (x, y), (x+w, y+h), (0, 255, 0), 2)
         cv2.putText(final_image, f'{i+1}', (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 255, 0), 1, cv2.LINE_AA)
+    save_image(output_dir, '0_final_profiles.jpg', final_image)
     return profile_images
 
 def preprocess_image(image_path):
@@ -533,13 +534,13 @@ def detect_and_extract_profiles(image_path, output_dir, gif_duration, url, inclu
     tprint(f"Processing image: {image_path}")
     image, contours = preprocess_image(image_path)
     tprint(f"Number of contours: {len(contours)}")
-    
+
     if image is None or image.size == 0:
         tprint("Error: Failed to load or preprocess the image.")
         return [], 0, [], []
 
     profile_regions, shape_type, profiles = process_contours(contours, image.shape[:2], output_dir, image)
-    
+
     if not profile_regions:
         tprint("No profile regions detected.")
         return [], len(contours), [], []

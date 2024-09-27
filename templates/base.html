@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>{% block title %}GROUP GO GIF{% endblock %}</title>
+        <link
+            rel="stylesheet"
+            href="{{ url_for('static', filename='css/style.css') }}"
+        />
+    </head>
+    <body>
+        <div id="particles-js"></div>
+        <div class="content">
+            <header>
+                <h1>{% block header %}GO GIF{% endblock %}</h1>
+            </header>
+            <main>{% block content %}{% endblock %}</main>
+            <footer>
+                <img
+                    src="{{ url_for('static', filename='images/base.png') }}"
+                    alt="Logo"
+                    class="logo"
+                />
+                <a href="{{ url_for('upload_file') }}" class="button"
+                    >{% block footer_button %}GO GIF{% endblock %}</a
+                >
+            </footer>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
+        <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    </body>
+</html>

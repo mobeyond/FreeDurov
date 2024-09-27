@@ -1,14 +1,22 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generated GIFs</title>
-</head>
-<body>
-    <h1>Generated GIFs</h1>
-    {% for gif in gif_files %}
-        <img src="{{ url_for('static', filename=gif) }}" alt="Generated GIF">
-    {% endfor %}
-</body>
-</html>
+{% extends "base.html" %} {% block title %}GOING GIF{% endblock %} {%
+block header %}GIF GOING{% endblock %} {% block content %}
+<div id="status-container">
+    <div id="status">RUNNING: {{ status }}</div>
+    <div id="loading-animation" class="lds-ring">
+        <div></div>
+        <div></div>
+        <div></div>
+        <div></div>
+    </div>
+</div>
+<div id="result-container">
+    {% if status == 'COMPLETED' and output_files %} {% for output_file in
+    output_files %}
+    <img
+        src="{{ url_for('static', filename=output_file) }}"
+        alt="Processed Image"
+        class="result-image"
+    />
+    {% endfor %} {% endif %}
+</div>
+{% endblock %} {% block footer_button %}HOME{% endblock %}

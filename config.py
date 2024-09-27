@@ -1,18 +1,18 @@
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMP_DIR = os.path.join(BASE_DIR, "temp_output")
+TEMP_DIR = os.path.join(BASE_DIR, "static/uploads")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 BASE_IMAGE_PATH = os.path.join(BASE_DIR, "base.png")
 
 DEBUG = False
-EXPORT_INTERMEDIARY_IMAGES = False
+EXPORT_INTERMEDIARY_IMAGES = True
 LOG_LEVEL = "INFO"
 LOG_FILE = os.path.join(BASE_DIR, "app.log")
 ERROR_NO_IMAGE = "No image data received"
 ERROR_NO_PROFILES = "No significant info detected in the image"
 
-DOMAIN_NAME = "eff.org"
+DOMAIN_NAME = "bing.com"
 HOST = "0.0.0.0"
 PORT = 9111
 
@@ -29,7 +29,7 @@ GIF_DURATION = 1000  # Duration for each frame in the GIF (milliseconds)
 MAX_PROFILES_PER_GIF = 100  # Maximum number of profiles to include in a single GIF
 INCLUDE_QR_CODE = False  # Set to True to enable QR code embedding
 INCLUDE_CANNY = True
-QR_CODE_URL = "https://https://zh.annas-archive.org/"
+QR_CODE_URL = "https://douban.com"
 
 HTML_TITLE = "GROUP GOES GIF"
 HTML_HEADER_COLOR = "#4CAF50"
