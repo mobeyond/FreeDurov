@@ -1,0 +1,23 @@
+# FreeDurov - Image Splitting & GIF Creation Service
+# Core Dependencies
+
+# Web Framework
+Flask==2.3.3
+Werkzeug==2.3.7
+
+# Image Processing
+opencv-python==4.8.1.78
+Pillow==10.0.1
+numpy==1.24.3
+scipy==1.11.3
+scikit-learn==1.3.2
+
+# Optional QR Code Support
+qrcode[pil]==7.4.2
+
+# Development & Testing
+pytest==7.4.3
+requests==2.31.0
+
+# Additional utilities
+python-dateutil==2.8.2

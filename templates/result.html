@@ -10,13 +10,27 @@ block header %}GIF GOING{% endblock %} {% block content %}
     </div>
 </div>
 <div id="result-container">
-    {% if status == 'COMPLETED' and output_files %} {% for output_file in
-    output_files %}
-    <img
-        src="{{ url_for('static', filename=output_file) }}"
-        alt="Processed Image"
-        class="result-image"
-    />
-    {% endfor %} {% endif %}
+    {% if status == 'COMPLETED' and output_files %} 
+        <h3>Generated GIF Files:</h3>
+        {% for file_info in output_files %}
+        <div class="result-item">
+            <img
+                src="{{ file_info.url }}"
+                alt="Generated GIF: {{ file_info.filename }}"
+                class="result-image"
+            />
+            <div class="file-info">
+                <p>{{ file_info.filename }}</p>
+                <a href="{{ file_info.url }}" download="{{ file_info.filename }}" class="download-btn">Download</a>
+            </div>
+        </div>
+        {% endfor %} 
+    {% elif status == 'PROCESSING' %}
+        <p>Processing your image... Please wait.</p>
+    {% elif status == 'FAILED' %}
+        <p>Sorry, there was an error processing your image. Please try again with a different image.</p>
+    {% else %}
+        <p>No results available yet.</p>
+    {% endif %}
 </div>
 {% endblock %} {% block footer_button %}HOME{% endblock %}

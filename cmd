@@ -1,0 +1,1 @@
+python c:\Local\FreeDurov\test_application.py

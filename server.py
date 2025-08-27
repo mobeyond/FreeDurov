@@ -1,7 +1,9 @@
-import io, traceback, cgi, http.server, ssl, threading, logging
+import io, traceback, http.server, ssl, threading, logging, os, tempfile
 import config
 from image_processor import process_avasplit
 from html_generator import generate_html_response, generate_no_gifs_html
+from email.parser import BytesParser
+from email.policy import default
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -42,15 +44,41 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
         logging.info(f"Received POST data of length: {content_length}")
 
         try:
-            # Parse the multipart form data
-            boundary = self.headers['Content-Type'].split("=")[1].encode()
-            fields = cgi.parse_multipart(io.BytesIO(post_data), {"boundary": boundary})
+            # Parse multipart form data using email parser
+            content_type = self.headers.get('Content-Type', '')
+            if 'multipart/form-data' not in content_type:
+                raise ValueError("Invalid content type")
             
-            image_data = fields.get('imageFile', [b''])[0]
+            # Create a proper email message from the post data
+            env_data = f"Content-Type: {content_type}\r\n\r\n".encode() + post_data
+            parser = BytesParser(policy=default)
+            msg = parser.parsebytes(env_data)
+            
+            # Extract image file from form data
+            image_data = None
+            for part in msg.iter_parts():
+                if part.get_content_disposition() == 'form-data':
+                    name = part.get_param('name', header='Content-Disposition')
+                    if name == 'imageFile':
+                        image_data = part.get_payload(decode=True)
+                        break
+            
             if not image_data:
                 raise ValueError("No image data received")
 
-            gif_files = process_avasplit(image_data)
+            # Save image to temporary file for processing
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
+                temp_file.write(image_data)
+                temp_image_path = temp_file.name
+            
+            # Create output directory
+            output_dir = tempfile.mkdtemp()
+            
+            try:
+                gif_files = process_avasplit(temp_image_path, output_dir)
+            finally:
+                # Clean up temporary image file
+                os.unlink(temp_image_path)
             
             if not gif_files:
                 logging.warning("No GIF files generated. Sending disclaimer response.")
@@ -124,11 +152,23 @@ def run_server(port, use_https=False):
     httpd = http.server.HTTPServer(server_address, MyHandler)
     
     if use_https:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(certfile=config.SSL_CERT_FILE, keyfile=config.SSL_KEY_FILE)
-        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
-        logging.info(f"Serving HTTPS on port {port}")
-    else:
+        try:
+            # Check if SSL files exist before loading
+            if not os.path.exists(config.SSL_CERT_FILE) or not os.path.exists(config.SSL_KEY_FILE):
+                logging.warning(f"SSL certificate files not found: {config.SSL_CERT_FILE}, {config.SSL_KEY_FILE}")
+                logging.info("Continuing with HTTP only")
+                use_https = False
+            else:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.load_cert_chain(certfile=config.SSL_CERT_FILE, keyfile=config.SSL_KEY_FILE)
+                httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+                logging.info(f"Serving HTTPS on port {port}")
+        except Exception as e:
+            logging.error(f"Failed to initialize HTTPS: {str(e)}")
+            logging.info("Continuing with HTTP only")
+            use_https = False
+    
+    if not use_https:
         logging.info(f"Serving HTTP on port {port}")
     
     try:
@@ -140,11 +180,20 @@ def run_server(port, use_https=False):
         logging.info("Server closed.")
 
 if __name__ == "__main__":
-    http_thread = threading.Thread(target=run_server, args=(config.HTTP_PORT,))
-    https_thread = threading.Thread(target=run_server, args=(config.HTTPS_PORT, True))
+    # Ensure upload directories exist
+    os.makedirs(config.TEMP_DIR, exist_ok=True)
+    os.makedirs(config.OUTPUT_DIR, exist_ok=True)
     
-    http_thread.start()
-    https_thread.start()
-    
-    http_thread.join()
-    https_thread.join()
+    # Only start HTTP server if SSL files don't exist
+    if os.path.exists(config.SSL_CERT_FILE) and os.path.exists(config.SSL_KEY_FILE):
+        http_thread = threading.Thread(target=run_server, args=(config.HTTP_PORT,))
+        https_thread = threading.Thread(target=run_server, args=(config.HTTPS_PORT, True))
+        
+        http_thread.start()
+        https_thread.start()
+        
+        http_thread.join()
+        https_thread.join()
+    else:
+        logging.info("SSL certificates not found, starting HTTP server only")
+        run_server(config.HTTP_PORT, False)

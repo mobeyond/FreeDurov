@@ -100,10 +100,19 @@ def refined_cluster_contours(contours, image_shape, output_dir):
         return filtered_contours, None, None
 
     features = np.float32([[shape_factor(c), cv2.contourArea(c) / total_area] for c in filtered_contours])
-    features = (features - np.mean(features, axis=0)) / np.std(features, axis=0)
+    if len(features) == 0:
+        return filtered_contours, "square"
+    
+    # Normalize features
+    features = (features - np.mean(features, axis=0)) / (np.std(features, axis=0) + 1e-8)
 
     n_clusters = min(4, len(filtered_contours))
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
+    
+    # Ensure features are in correct format for OpenCV k-means
+    features = np.array(features, dtype=np.float32)
+    
+    # Apply k-means clustering
     _, labels, _ = cv2.kmeans(features, n_clusters, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
 
     cluster_image = np.zeros(image_shape[:2] + (3,), dtype=np.uint8)
@@ -395,12 +404,16 @@ def strict_combine_contours(filtered_shapes, aggregated_contours, template, tpl_
     tprint(f"Number of contours: anchors={len(filtered_shapes)}, aggregated={len(aggregated_contours)}, final={len(combined_contours)}")
     return combined_contours
 
-def refine_contours(contours, image_shape):
+def refined_contours(contours, image_shape):
     refined = []
     for contour in contours:
         if cv2.contourArea(contour) > image_shape[0] * image_shape[1] * 0.001:  # Adjust threshold as needed
             refined.append(contour)
     return refined
+
+def refine_contours(contours, image_shape):
+    """Alias for refined_contours to maintain backward compatibility."""
+    return refined_contours(contours, image_shape)
 
 def process_contours(contours, image_shape, output_dir, original_image):
     tprint("Entering process_contours function")
