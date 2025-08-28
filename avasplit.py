@@ -92,7 +92,7 @@ def make_more_shape(contours, shape_type):
 
 def refined_cluster_contours(contours, image_shape, output_dir):
     total_area = image_shape[0] * image_shape[1]
-    min_area = max(total_area * config.MIN_CONTOUR_RATIO, config.MIN_CONTOUR_AREA)
+    min_area = max(total_area * (config.MIN_CONTOUR_RATIO or 0.0005), config.MIN_CONTOUR_AREA or 225)
     filtered_contours = [c for c in contours if is_valid_contour(c) and cv2.contourArea(c) >= min_area]
     tprint("Num of Filtered Contours", len(filtered_contours))
     if len(filtered_contours) < 2:
@@ -135,7 +135,8 @@ def refined_cluster_contours(contours, image_shape, output_dir):
         cluster_metrics.append((i, total_cluster_area, avg_shape_factor))
 
     best_cluster = sorted(cluster_metrics, key=lambda x: x[1], reverse=True)[0]
-    shape_type = "circle" if abs(best_cluster[2] - 1) < abs(best_cluster[2] - config.SQR_OR_CIRC) else "square"  # Perimeter Ratio
+    sqr_or_circ_threshold = config.SQR_OR_CIRC if config.SQR_OR_CIRC is not None else 0.747
+    shape_type = "circle" if abs(best_cluster[2] - 1) < abs(best_cluster[2] - sqr_or_circ_threshold) else "square"  # Perimeter Ratio
     tprint(f"Shape type: {shape_type}", best_cluster[2])
     best_cluster_contours = [filtered_contours[i] for i, label in enumerate(labels.ravel()) if label == best_cluster[0]]
 
@@ -498,14 +499,14 @@ def process_contours(contours, image_shape, output_dir, original_image):
 
         profile_regions = generate_profile_regions(aligned_combined_contours, image_shape)
 
-        profiles = extract_profiles(original_image, profile_regions, output_dir)
+        profiles, profile_filenames = extract_profiles(original_image, profile_regions, output_dir)
 
-        return combined_contours, tpl_shape_type, profiles
+        return combined_contours, tpl_shape_type, profiles, profile_filenames
 
     except Exception as e:
         tprint(f"Error in process_contours: {str(e)}")
         traceback.print_exc()
-        return [], None, None
+        return [], None, None, []
 
 def generate_profile_regions(extracting_shapes, image_shape):
     profile_regions = []
@@ -523,17 +524,24 @@ def generate_profile_regions(extracting_shapes, image_shape):
 
 def extract_profiles(image, regions, output_dir):
     profile_images = []
+    profile_filenames = []
+    
     for i, (x, y, w, h) in enumerate(regions):
         profile = image[y:y+h, x:x+w]
         if profile is not None and profile.size > 0:
             profile_images.append(profile)
+            # Save individual profile image for selection interface
+            profile_filename = f'profile_{i+1:03d}.jpg'
+            profile_path = os.path.join(output_dir, profile_filename)
+            cv2.imwrite(profile_path, profile)
+            profile_filenames.append(profile_filename)
 
     final_image = image.copy()
     for i, (x, y, w, h) in enumerate(regions):
         cv2.rectangle(final_image, (x, y), (x+w, y+h), (0, 255, 0), 2)
         cv2.putText(final_image, f'{i+1}', (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 255, 0), 1, cv2.LINE_AA)
     save_image(output_dir, '0_final_profiles.jpg', final_image)
-    return profile_images
+    return profile_images, profile_filenames
 
 def preprocess_image(image_path):
     image = cv2.imread(image_path)
@@ -550,14 +558,15 @@ def detect_and_extract_profiles(image_path, output_dir, gif_duration, url, inclu
 
     if image is None or image.size == 0:
         tprint("Error: Failed to load or preprocess the image.")
-        return [], 0, [], []
+        return [], 0, [], [], []
 
-    profile_regions, shape_type, profiles = process_contours(contours, image.shape[:2], output_dir, image)
+    profile_regions, shape_type, profiles, profile_filenames = process_contours(contours, image.shape[:2], output_dir, image)
 
     if not profile_regions:
         tprint("No profile regions detected.")
-        return [], len(contours), [], []
+        return [], len(contours), [], [], []
 
-    gif_files = create_gif_from_profiles(profiles, output_dir, gif_duration, url, include_qr)
+    # Note: GIF creation is now deferred until after user selection
+    # gif_files = create_gif_from_profiles(profiles, output_dir, gif_duration, url, include_qr)
 
-    return profile_regions, len(profiles), profiles, gif_files
+    return profile_regions, len(profiles), profiles, profile_filenames, []

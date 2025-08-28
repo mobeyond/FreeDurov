@@ -27,6 +27,10 @@ block header %}GIF GOING{% endblock %} {% block content %}
         {% endfor %} 
     {% elif status == 'PROCESSING' %}
         <p>Processing your image... Please wait.</p>
+    {% elif status == 'PROFILES_EXTRACTED' %}
+        <p>Profiles extracted! Please <a href="{{ url_for('selection', job_id=job_id) }}">select which profiles</a> to include in your GIF.</p>
+    {% elif status == 'CREATING_GIFS' %}
+        <p>Creating GIFs from your selected profiles... Please wait.</p>
     {% elif status == 'FAILED' %}
         <p>Sorry, there was an error processing your image. Please try again with a different image.</p>
     {% else %}

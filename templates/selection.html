@@ -1,0 +1,73 @@
+{% extends "base.html" %} {% block title %}Select Profiles{% endblock %} {%
+block header %}SELECT PROFILES{% endblock %} {% block content %}
+<div id="selection-container">
+    {% if processing %}
+        <div id="status-container">
+            <div id="status">PROCESSING: Extracting profiles from your image...</div>
+            <div id="loading-animation" class="lds-ring">
+                <div></div>
+                <div></div>
+                <div></div>
+                <div></div>
+            </div>
+            <p>Please wait while we extract individual profiles from your uploaded image.</p>
+            <script>
+                // Auto-refresh every 3 seconds to check if processing is complete
+                setTimeout(function() {
+                    window.location.reload();
+                }, 3000);
+            </script>
+        </div>
+    {% elif profiles %}
+        <div id="selection-interface">
+            <h2>Select Profiles for GIF Creation</h2>
+            <p>We found {{ profiles|length }} profile(s) in your image. Please select which ones you'd like to include in the generated GIF(s):</p>
+            
+            <form id="selection-form" action="{{ url_for('confirm_selection', job_id=job_id) }}" method="post">
+                <div class="selection-controls">
+                    <button type="button" id="select-all-btn" class="control-btn">Select All</button>
+                    <button type="button" id="select-none-btn" class="control-btn">Select None</button>
+                    <span id="selection-count">0 selected</span>
+                </div>
+                
+                <div class="profiles-grid">
+                    {% for profile in profiles %}
+                    <div class="profile-item">
+                        <div class="profile-checkbox-container">
+                            <input type="checkbox" id="profile_{{ loop.index }}" name="selected_profiles" value="{{ profile.filename }}" class="profile-checkbox">
+                            <label for="profile_{{ loop.index }}" class="profile-label">
+                                <img src="{{ profile.url }}" alt="{{ profile.display_name }}" class="profile-image" loading="lazy">
+                                <div class="profile-info">
+                                    <span class="profile-name">{{ profile.display_name }}</span>
+                                </div>
+                                <div class="checkbox-overlay">
+                                    <div class="checkmark">✓</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                
+                <div class="submit-container">
+                    <button type="submit" id="create-gif-btn" class="submit-btn" disabled>
+                        Create GIF from Selected Profiles
+                    </button>
+                    <p class="submit-help">Please select at least one profile to continue.</p>
+                </div>
+            </form>
+        </div>
+    {% else %}
+        <div id="error-container">
+            <h2>No Profiles Found</h2>
+            <p>We couldn't extract any profiles from your image. This could happen if:</p>
+            <ul>
+                <li>The image doesn't contain clear profile shapes</li>
+                <li>The profiles are too small or unclear</li>
+                <li>The background is too complex</li>
+            </ul>
+            <a href="{{ url_for('upload_file') }}" class="retry-btn">Try Another Image</a>
+        </div>
+    {% endif %}
+</div>
+{% endblock %} {% block footer_button %}HOME{% endblock %}

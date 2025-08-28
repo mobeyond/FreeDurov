@@ -25,7 +25,8 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
 
 # Create upload directories
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+if isinstance(config.OUTPUT_DIR, str):
+    os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,7 +37,13 @@ MAX_FILE_SIZE_MB = 16
 # Security configuration
 ALLOWED_BASE_DIRS = [app.config['UPLOAD_FOLDER'], config.OUTPUT_DIR]
 
-job_data = defaultdict(lambda: {'status': 'PENDING', 'output_files': [], 'created_at': time.time()})
+job_data = defaultdict(lambda: {
+    'status': 'PENDING', 
+    'output_files': [], 
+    'profile_filenames': [],
+    'selected_profiles': [],
+    'created_at': time.time()
+})
 
 # Clean up old job data periodically
 def cleanup_old_jobs():
@@ -80,12 +87,17 @@ def image_processor(input_path, output_dir, job_id):
     try:
         time.sleep(5)
 
-        gif_files = process_avasplit(input_path, output_dir)
-        for gif_file in gif_files:
-            output_path = gif_file
-            job_data[job_id]['output_files'].append(output_path)
-
-        job_data[job_id]['status'] = 'COMPLETED'
+        # Extract profiles without creating GIFs yet
+        profile_regions, profile_filenames = process_avasplit(input_path, output_dir)
+        
+        if profile_filenames:
+            # Store extracted profile information for selection
+            job_data[job_id]['profile_filenames'] = profile_filenames
+            job_data[job_id]['status'] = 'PROFILES_EXTRACTED'
+        else:
+            job_data[job_id]['status'] = 'FAILED'
+            logger.error(f"No profiles extracted for job {job_id}")
+            
     except Exception as e:
         logger.error(f"Error processing image: {str(e)}")
         job_data[job_id]['status'] = 'FAILED'
@@ -111,6 +123,9 @@ def upload_file():
         try:
             # Generate safe filename
             original_filename = file.filename
+            if not original_filename:
+                return render_template('index.html', error="Invalid filename")
+                
             safe_filename = generate_safe_filename(original_filename, unique=True)
             
             # Create timestamped job ID and directory
@@ -144,7 +159,7 @@ def upload_file():
                 daemon=True
             ).start()
 
-            return redirect(url_for('result', job_id=job_id))
+            return redirect(url_for('selection', job_id=job_id))
             
         except ValueError as ve:
             logger.error(f"Security violation in upload: {str(ve)}")
@@ -202,6 +217,126 @@ def result(job_id):
                          job_id=job_id, 
                          status=status, 
                          output_files=safe_file_urls)
+
+@app.route('/selection/<job_id>')
+def selection(job_id):
+    """Display profile selection page."""
+    # Validate job_id format for security
+    if not re.match(r'^[0-9]{8}_[0-9]{6}_[a-zA-Z0-9_.-]+$', job_id):
+        logger.warning(f"Invalid job_id format: {job_id}")
+        abort(404)
+    
+    if job_id not in job_data:
+        logger.warning(f"Job not found: {job_id}")
+        abort(404)
+    
+    job_info = job_data[job_id]
+    status = job_info['status']
+    
+    logger.info(f"Selection page for job {job_id}, status: {status}")
+    
+    if status == 'PROFILES_EXTRACTED':
+        profile_filenames = job_info.get('profile_filenames', [])
+        
+        # Create URLs for profile images
+        profile_urls = []
+        for filename in profile_filenames:
+            try:
+                # Extract timestamp from job_id to build relative path
+                timestamp = job_id.split('_')[0] + '_' + job_id.split('_')[1]
+                rel_path = f"{timestamp}/{filename}"
+                rel_path_url = rel_path.replace('\\', '/')
+                
+                file_url = url_for('download_file', filename=rel_path_url)
+                profile_urls.append({
+                    'url': file_url,
+                    'filename': filename,
+                    'display_name': filename.replace('.jpg', '').replace('profile_', 'Profile ')
+                })
+                logger.info(f"Generated profile URL: {file_url} for {filename}")
+            except Exception as e:
+                logger.error(f"Error processing profile {filename}: {e}")
+        
+        return render_template('selection.html', 
+                             job_id=job_id, 
+                             profiles=profile_urls)
+    
+    elif status == 'PROCESSING':
+        return render_template('selection.html', 
+                             job_id=job_id, 
+                             processing=True)
+    else:
+        # Redirect to result if not in profile extraction phase
+        return redirect(url_for('result', job_id=job_id))
+
+@app.route('/confirm_selection/<job_id>', methods=['POST'])
+def confirm_selection(job_id):
+    """Handle user profile selection and trigger GIF generation."""
+    # Validate job_id format for security
+    if not re.match(r'^[0-9]{8}_[0-9]{6}_[a-zA-Z0-9_.-]+$', job_id):
+        logger.warning(f"Invalid job_id format: {job_id}")
+        abort(404)
+    
+    if job_id not in job_data:
+        logger.warning(f"Job not found: {job_id}")
+        abort(404)
+    
+    try:
+        # Get selected profiles from form data
+        selected_profiles = request.form.getlist('selected_profiles')
+        
+        if not selected_profiles:
+            logger.warning(f"No profiles selected for job {job_id}")
+            return redirect(url_for('selection', job_id=job_id))
+        
+        logger.info(f"Selected {len(selected_profiles)} profiles for job {job_id}: {selected_profiles}")
+        
+        # Update job status and start GIF generation
+        job_data[job_id]['status'] = 'CREATING_GIFS'
+        job_data[job_id]['selected_profiles'] = selected_profiles
+        
+        # Start GIF creation in background thread
+        threading.Thread(
+            target=gif_generator, 
+            args=(job_id, selected_profiles),
+            daemon=True
+        ).start()
+        
+        return redirect(url_for('result', job_id=job_id))
+        
+    except Exception as e:
+        logger.error(f"Error processing selection for job {job_id}: {str(e)}")
+        job_data[job_id]['status'] = 'FAILED'
+        return redirect(url_for('result', job_id=job_id))
+
+def gif_generator(job_id, selected_profile_filenames):
+    """Generate GIFs from selected profiles."""
+    try:
+        # Get job information
+        job_info = job_data[job_id]
+        
+        # Extract timestamp from job_id to build output directory path
+        timestamp = job_id.split('_')[0] + '_' + job_id.split('_')[1]
+        output_dir = secure_path_join(app.config['UPLOAD_FOLDER'], timestamp)
+        
+        # Import the function for creating GIFs from selected profiles
+        from image_processor import create_gifs_from_selected_profiles
+        
+        # Create GIFs from selected profiles
+        gif_files = create_gifs_from_selected_profiles(selected_profile_filenames, output_dir)
+        
+        if gif_files:
+            for gif_file in gif_files:
+                job_data[job_id]['output_files'].append(gif_file)
+            job_data[job_id]['status'] = 'COMPLETED'
+            logger.info(f"Successfully generated {len(gif_files)} GIF files for job {job_id}")
+        else:
+            job_data[job_id]['status'] = 'FAILED'
+            logger.error(f"Failed to generate GIF files for job {job_id}")
+            
+    except Exception as e:
+        logger.error(f"Error generating GIFs for job {job_id}: {str(e)}")
+        job_data[job_id]['status'] = 'FAILED'
 
 @app.route('/job_status/<job_id>')
 def job_status(job_id):
@@ -302,10 +437,10 @@ def run_app_https(port, certfile, keyfile):
     app.run(host='0.0.0.0', port=port, ssl_context=context, threaded=True)
 
 if __name__ == '__main__':
-    http_port = config.HTTP_PORT
-    https_port = config.HTTPS_PORT
-    cert_path = config.SSL_CERT_FILE
-    key_path = config.SSL_KEY_FILE
+    http_port = config.HTTP_PORT if isinstance(config.HTTP_PORT, int) else 80
+    https_port = config.HTTPS_PORT if isinstance(config.HTTPS_PORT, int) else 443
+    cert_path = config.SSL_CERT_FILE if isinstance(config.SSL_CERT_FILE, str) else "cert.pem"
+    key_path = config.SSL_KEY_FILE if isinstance(config.SSL_KEY_FILE, str) else "key.pem"
 
     # Only start HTTPS if SSL files exist
     if os.path.exists(cert_path) and os.path.exists(key_path):
